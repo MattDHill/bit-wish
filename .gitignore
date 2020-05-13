@@ -1,0 +1,10 @@
+.vscode
+
+node_modules/
+dist/
+
+bitwish.sql
+bitwish_test.sql
+
+config.json
+ormconfig.json
