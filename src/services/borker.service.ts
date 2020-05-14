@@ -3,7 +3,7 @@ import { Utxo, UtxoSeed } from '../db/entities/utxo'
 import * as borker from 'borker-rs-node'
 import fetch from 'node-fetch'
 
-const wallet = new borker.JsWallet(process.env.mnemonic!.replace(/ +/g, " ").split(' ')).childAt([-44, -0, -0, 0, 0])
+const wallet = new borker.JsWallet(process.env.MNEMONIC!.replace(/ +/g, " ").split(',')).childAt([-44, -0, -0, 0, 0])
 let feeEstimate: FeeEstimationRes
 
 export async function construct (handle: string, message: string): Promise<string> {

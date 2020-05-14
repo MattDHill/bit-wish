@@ -11,26 +11,23 @@ export enum MessageStatus {
   processing_bork = 'processing_bork',
   processing_reply = 'processing_reply',
   failed = 'failed',
+  // complete states
   rejected_no_text = 'rejected_no_text',
   rejected_too_long = 'rejected_too_long',
+  rejected_contains_media = 'rejected_contains_media',
   rejected_duplicate = 'rejected_duplicate',
-  // complete states
   complete = 'complete',
-  failed_permanently = 'failed_permanently',
-  rejected_no_text_sent = 'rejected_no_text_sent',
-  rejected_too_long_sent = 'rejected_too_long_sent',
-  rejected_duplicate_sent = 'rejected_duplicate_sent',
 }
 
 @Entity({ name: 'messages' })
 export class Message {
 
-  @PrimaryColumn('int', { name: 'tweet_id' })
-  tweetId: number
+  @PrimaryColumn('text', { name: 'tweet_id' })
+  tweetId: string
 
   @Index()
-  @Column('int', { name: 'user_id' })
-  userId: number
+  @Column('text', { name: 'user_id' })
+  userId: string
 
   @Column('text', { name: 'user_handle' })
   userHandle: string
@@ -54,22 +51,22 @@ export class Message {
   @Column('text', { name: 'bitcoin_txid', nullable: true })
   bitcoinTxid: string | null
 
-  @Column('int', { name: 'reply_tweet_id', nullable: true })
-  replyTweetId: number | null
+  @Column('text', { name: 'reply_tweet_id', nullable: true })
+  replyTweetId: string | null
 
   @Column('text', { name: 'failed_error', nullable: true })
   failedError: string | null
 }
 
 export interface MessageSeed {
-  tweetId: number
-  userId: number
+  tweetId: string
+  userId: string
   userHandle: string
   createdAt: Date
   updatedAt: Date
   status: MessageStatus
   text: string
   bitcoinTxid?: string
-  replyTweetId?: number
+  replyTweetId?: string
   failedError?: string
 }

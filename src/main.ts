@@ -1,36 +1,52 @@
-import { getRepository, In } from 'typeorm'
+import { getRepository, In, getManager } from 'typeorm'
 import { Message, MessageStatus, MessageSeed } from './db/entities/message'
 import * as twitter from './services/twitter.service'
 import * as borker from './services/borker.service'
 import * as bitcoin from './services/bitcoin.service'
 
-let last_message_id: number
+let since_id: string | undefined
+let max_id: string | undefined
 
 export async function start (): Promise<void> {
-  const last = await getRepository(Message).findOne(undefined, { order: { createdAt: 'DESC' } })
-  if (last) { last_message_id = last.tweetId }
+  const last = await getManager().findOne(Message, { order: { createdAt: 'DESC' } })
+  if (last) { since_id = last.tweetId }
   poll()
 }
 
 async function poll () {
   try {
-    const mentions = await twitter.getMentions(last_message_id)
-    await processMentions(mentions)
+    const mentions = await getMentions()
+    if (mentions.length) { await processMentions(mentions) }
   } catch (e) {
     console.error(e.message)
   } finally {
-    setTimeout(poll, 3600000)
+    setTimeout(poll, 43200000) // 12h
   }
 }
 
+async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
+  let keepGoing = true
+  let toReturn: twitter.MentionsTimelineRow[] = []
+
+  while (keepGoing) {
+    const mentions = await twitter.getMentions(since_id, max_id)
+    if (max_id) { mentions.shift() }
+    keepGoing = !!mentions.length
+    toReturn.concat(mentions)
+    max_id = mentions[mentions.length - 1].id_str
+  }
+  
+  return toReturn
+}
+
 async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promise<void> {
-  const relevant = mentions.filter(m => m.in_reply_to_status_id_str === process.env.TWITTER_RELEVANT_TWEET!)
+  const relevant = mentions.filter(m => m.in_reply_to_status_id_str === process.env.TWITTER_TWEET_ID!)
 
   const repo = getRepository(Message)
 
   // @TODO make sure we are going oldest to newest
   for (let m of relevant) {
-    const previous = await repo.findOne(m.user.id, {
+    const previous = await repo.findOne(m.user.id_str, {
       where: {
         status: In([
           MessageStatus.accepted,
@@ -42,37 +58,37 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       }
     })
 
+    const text = m.full_text.substr(m.display_text_range[0], m.display_text_range[1] - m.display_text_range[0])
     let status: MessageStatus
     if (previous) {
       status = MessageStatus.rejected_duplicate
-    } else if (!m.text) {
+    } else if (!text) {
       status = MessageStatus.rejected_no_text
-    } else if (m.text.length > 59) {
+    } else if (m.entities.media.length || m.entities.polls.length || m.entities.urls.length) {
+      status = MessageStatus.rejected_contains_media
+    } else if (text.length > 59) {
       status = MessageStatus.rejected_too_long
     } else {
       status = MessageStatus.accepted
     }
 
-    const now = new Date()
     const seed: MessageSeed = {
-      tweetId: m.id,
-      userId: m.user.id,
+      tweetId: m.id_str,
+      userId: m.user.id_str,
       userHandle: m.user.screen_name,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: new Date(),
+      updatedAt: new Date(),
       status,
-      text: m.text
+      text,
     }
 
     const message = await repo.save(repo.create(seed))
 
     if (message.status === MessageStatus.accepted) {
       await handleAccepted(message)
-    } else {
-      await handleRejected(message)
     }
 
-    last_message_id = m.id
+    since_id = m.id_str
   }
 }
 
@@ -91,44 +107,14 @@ async function handleAccepted (message: Message): Promise<void> {
     const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, txid)
     await getRepository(Message).update(message.tweetId, {
       status: MessageStatus.complete,
-      replyTweetId: tweet.id
+      replyTweetId: tweet.id_str
     })
   } catch (e) {
     await handleError(message.tweetId, e)
   }
 }
 
-async function handleRejected (message: Message): Promise<void> {
-
-  let reply = ''
-  let status = message.status
-  switch (message.status) {
-    case MessageStatus.rejected_duplicate:
-      reply = 'You are only allowed one message.'
-      status = MessageStatus.rejected_duplicate_sent
-      break
-    case MessageStatus.rejected_no_text:
-      reply = 'You cannot send an empty message. Please add some text.'
-      status = MessageStatus.rejected_no_text_sent
-      break
-    case MessageStatus.rejected_too_long:
-      reply = 'Your message is too big. Must be 59 characters or less, including spaces.'
-      status = MessageStatus.rejected_too_long_sent
-      break
-  }
-
-  try {
-    const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, reply)
-    await getRepository(Message).update(message.tweetId, {
-      status,
-      replyTweetId: tweet.id
-    })
-  } catch (e) {
-    await handleError(message.tweetId, e)
-  }
-}
-
-async function handleError (tweetId: number, e: Error): Promise<void> {
+async function handleError (tweetId: string, e: Error): Promise<void> {
   console.error(e)
   await getRepository(Message).update(tweetId, {
     status: MessageStatus.failed,
