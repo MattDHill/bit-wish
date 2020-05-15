@@ -10,6 +10,7 @@ const client = new Twitter({
 export async function getMentions (since_id: string | undefined, max_id: string | undefined): Promise<MentionsTimelineRow[]> {
   const params: GetMentionsParams = {
     tweet_mode: 'extended',
+    include_rts: 1,
   }
   if (since_id) { params.since_id = since_id }
   if (max_id) { params.max_id = max_id }
@@ -18,9 +19,9 @@ export async function getMentions (since_id: string | undefined, max_id: string 
 }
 
 // @TODO max 300 per 3 hour period
-export async function tweetReply (tweetId: string, handle: string, message: string): Promise<TweetRes> {
+export async function tweetReply (tweetId: string, handle: string, txid: string): Promise<TweetRes> {
   return client.post<TweetRes>('statuses/update', {
-    status: message,
+    status: txid,
     in_reply_to_status_id: tweetId,
     username: handle,
     trim_user: true,
@@ -29,6 +30,7 @@ export async function tweetReply (tweetId: string, handle: string, message: stri
 
 interface GetMentionsParams {
   tweet_mode: 'extended'
+  include_rts: 1
   since_id?: string
   max_id?: string
 }

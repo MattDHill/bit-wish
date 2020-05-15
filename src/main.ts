@@ -16,7 +16,7 @@ export async function start (): Promise<void> {
 async function poll () {
   try {
     const mentions = await getMentions()
-    if (mentions.length) { await processMentions(mentions) }
+    if (mentions.length) { await processMentions(mentions.reverse()) }
   } catch (e) {
     console.error(e.message)
   } finally {
@@ -29,11 +29,16 @@ async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
   let toReturn: twitter.MentionsTimelineRow[] = []
 
   while (keepGoing) {
-    const mentions = await twitter.getMentions(since_id, max_id)
-    if (max_id) { mentions.shift() }
-    keepGoing = !!mentions.length
-    toReturn.concat(mentions)
-    max_id = mentions[mentions.length - 1].id_str
+    try {
+      const mentions = await twitter.getMentions(since_id, max_id)
+      if (max_id) { mentions.shift() }
+      keepGoing = !!mentions.length
+      toReturn.concat(mentions)
+      max_id = mentions[mentions.length - 1].id_str
+    } catch (e) {
+      console.error(`error fetching mentions: ${e}`)
+      keepGoing = false
+    }
   }
   
   return toReturn
