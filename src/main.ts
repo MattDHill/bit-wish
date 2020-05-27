@@ -3,6 +3,7 @@ import { Message, MessageStatus, MessageSeed } from './db/entities/message'
 import * as twitter from './services/twitter.service'
 import * as borker from './services/borker.service'
 import * as bitcoin from './services/bitcoin.service'
+import { Utxo } from './db/entities/utxo'
 
 let since_id: string | undefined
 let max_id: string | undefined
@@ -47,11 +48,9 @@ async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
 async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promise<void> {
   const relevant = mentions.filter(m => m.in_reply_to_status_id_str === process.env.TWITTER_TWEET_ID!)
 
-  const repo = getRepository(Message)
-
   // @TODO make sure we are going oldest to newest
   for (let m of relevant) {
-    const previous = await repo.findOne(m.user.id_str, {
+    const previous = await getRepository(Message).findOne(m.user.id_str, {
       where: {
         status: In([
           MessageStatus.accepted,
@@ -87,7 +86,7 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       text,
     }
 
-    const message = await repo.save(repo.create(seed))
+    const message = await getRepository(Message).save(getRepository(Message).create(seed))
 
     if (message.status === MessageStatus.accepted) {
       await handleAccepted(message)
@@ -98,16 +97,18 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
 }
 
 async function handleAccepted (message: Message): Promise<void> {
-  const repo = getRepository(Message)
 
   try {
     // bork
-    const signedTx = await borker.construct(message.userHandle, message.text)
+    const { signedTx, inputs } = await borker.construct(message.userHandle, message.text)
     const txid = await bitcoin.broadcast(signedTx)
-    await repo.update(message.tweetId, {
+    await getRepository(Message).update(message.tweetId, {
       status: MessageStatus.processing_reply,
       bitcoinTxid: txid,
     })
+    for (let input of inputs) {
+      await getRepository(Utxo).update(input.txid, { spentAt: new Date() })
+    }
     // reply
     const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, txid)
     await getRepository(Message).update(message.tweetId, {

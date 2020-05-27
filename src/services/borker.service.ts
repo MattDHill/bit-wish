@@ -6,7 +6,7 @@ import fetch from 'node-fetch'
 const wallet = new borker.JsWallet(process.env.MNEMONIC!.replace(/ +/g, " ").split(',')).childAt([-44, -0, -0, 0, 0])
 let feeEstimate: FeeEstimationRes
 
-export async function construct (handle: string, message: string): Promise<string> {
+export async function construct (handle: string, message: string): Promise<{ signedTx: string, inputs: Utxo[] }> {
   if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 3600000) {
     feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
   }
@@ -49,7 +49,7 @@ export async function construct (handle: string, message: string): Promise<strin
   }
   const txs = wallet.newBork(data, txids, null, [], fee, borker.Network.Bitcoin)
 
-  return txs[0]
+  return { signedTx: txs[0], inputs }
 }
 
 async function getMoreUtxos (): Promise<number> {
