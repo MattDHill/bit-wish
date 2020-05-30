@@ -4,8 +4,7 @@
 node_modules/
 dist/
 
-bitwish.sql
-bitwish_test.sql
+*.sql
 
 config.json
 ormconfig.json
