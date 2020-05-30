@@ -5,7 +5,7 @@ import {
 } from 'typeorm'
 
 @Entity({ name: 'utxos' })
-export class Utxo {
+export class Utx {
 
   @PrimaryColumn('text', { name: 'txid' })
   txid: string
@@ -18,11 +18,15 @@ export class Utxo {
 
   @Column('int', { name: 'amount' })
   amount: number
+
+  @Column('text', { name: 'raw_tx' })
+  rawTx: string
 }
 
-export interface UtxoSeed {
+export interface UtxSeed {
   txid: string
   receivedAt: Date
   spentAt?: Date
   amount: number
+  rawTx: string
 }

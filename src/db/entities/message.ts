@@ -10,7 +10,8 @@ export enum MessageStatus {
   accepted = 'accepted',
   processing_bork = 'processing_bork',
   processing_reply = 'processing_reply',
-  failed = 'failed',
+  bork_failed = 'bork_failed',
+  reply_failed = 'reply_failed',
   // complete states
   rejected_no_text = 'rejected_no_text',
   rejected_too_long = 'rejected_too_long',
@@ -44,9 +45,6 @@ export class Message {
 
   @Column('text', { name: 'text' })
   text: string
-
-  @Column('text', { name: 'bitcoin_tx', nullable: true })
-  bitcoinTx: string | null
 
   @Column('text', { name: 'bitcoin_txid', nullable: true })
   bitcoinTxid: string | null

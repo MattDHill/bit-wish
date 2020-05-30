@@ -1,14 +1,29 @@
 import { getRepository, In, getManager } from 'typeorm'
 import { Message, MessageStatus, MessageSeed } from './db/entities/message'
+import { Utx } from './db/entities/utxo'
 import * as twitter from './services/twitter.service'
 import * as borker from './services/borker.service'
-import * as bitcoin from './services/bitcoin.service'
-import { Utxo } from './db/entities/utxo'
 
 let since_id: string | undefined
 let max_id: string | undefined
 
 export async function start (): Promise<void> {
+  const replyFailed = await getManager().find(Message, {
+    where: { status: In([MessageStatus.reply_failed]) },
+    order: { createdAt: 'ASC' },
+  })
+  for (let message of replyFailed) {
+    await processReply(message)
+  }
+
+  const borkFailed = await getManager().find(Message, {
+    where: { status: In([MessageStatus.bork_failed]) },
+    order: { createdAt: 'ASC' },
+  })
+  for (let message of borkFailed) {
+    await processBorkAndReply(message)
+  }
+
   const last = await getManager().findOne(Message, { order: { createdAt: 'DESC' } })
   if (last) { since_id = last.tweetId }
   poll()
@@ -17,6 +32,7 @@ export async function start (): Promise<void> {
 async function poll () {
   try {
     const mentions = await getMentions()
+    // oldest to newest
     if (mentions.length) { await processMentions(mentions.reverse()) }
   } catch (e) {
     console.error(e.message)
@@ -48,7 +64,6 @@ async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
 async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promise<void> {
   const relevant = mentions.filter(m => m.in_reply_to_status_id_str === process.env.TWITTER_TWEET_ID!)
 
-  // @TODO make sure we are going oldest to newest
   for (let m of relevant) {
     const previous = await getRepository(Message).findOne(m.user.id_str, {
       where: {
@@ -56,7 +71,8 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
           MessageStatus.accepted,
           MessageStatus.processing_bork,
           MessageStatus.processing_reply,
-          MessageStatus.failed,
+          MessageStatus.bork_failed,
+          MessageStatus.reply_failed,
           MessageStatus.complete
         ])
       }
@@ -86,44 +102,58 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       text,
     }
 
-    const message = await getRepository(Message).save(getRepository(Message).create(seed))
+    let message = await getRepository(Message).save(getRepository(Message).create(seed))
 
     if (message.status === MessageStatus.accepted) {
-      await handleAccepted(message)
+      processBorkAndReply(message)
     }
 
     since_id = m.id_str
   }
 }
 
-async function handleAccepted (message: Message): Promise<void> {
+async function processBorkAndReply (message: Message): Promise<void> {
+  message = await processBork(message)
+  if (message.bitcoinTxid) {
+    await processReply(message)
+  }
+}
 
+async function processBork (message: Message): Promise<Message> {
   try {
-    // bork
     const { signedTx, inputs } = await borker.construct(message.userHandle, message.text)
-    const txid = await bitcoin.broadcast(signedTx)
-    await getRepository(Message).update(message.tweetId, {
-      status: MessageStatus.processing_reply,
-      bitcoinTxid: txid,
-    })
+    const txid = await borker.broadcast(signedTx)
+
+    message.status = MessageStatus.processing_reply
+    message.bitcoinTxid = txid
+    message = await getRepository(Message).save(message)
+
     for (let input of inputs) {
-      await getRepository(Utxo).update(input.txid, { spentAt: new Date() })
+      await getRepository(Utx).update(input.txid, { spentAt: new Date() })
     }
-    // reply
-    const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, txid)
+  } catch (e) {
+    await handleError(message.tweetId, MessageStatus.bork_failed, e)
+  }
+
+  return message
+}
+
+async function processReply (message: Message): Promise<void> {
+  try {
+    const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, message.bitcoinTxid!)
     await getRepository(Message).update(message.tweetId, {
       status: MessageStatus.complete,
       replyTweetId: tweet.id_str
     })
   } catch (e) {
-    await handleError(message.tweetId, e)
+    await handleError(message.tweetId, MessageStatus.reply_failed, e)
   }
 }
 
-async function handleError (tweetId: string, e: Error): Promise<void> {
+async function handleError (tweetId: string, status: MessageStatus, e: Error): Promise<void> {
   console.error(e)
   await getRepository(Message).update(tweetId, {
-    status: MessageStatus.failed,
+    status,
     failedError: JSON.stringify(e)
   })
 }

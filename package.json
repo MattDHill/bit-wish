@@ -21,6 +21,7 @@
     "dotenv": "^8.2.0",
     "node-fetch": "^2.6.0",
     "reflect-metadata": "^0.1.13",
+    "socks5-node-fetch": "0.0.4",
     "sqlite3": "^4.2.0",
     "tslib": "1.11.2",
     "twitter-lite": "^0.11.0",
