@@ -86,7 +86,7 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       status = MessageStatus.rejected_no_text
     } else if (m.entities.media.length || m.entities.polls.length || m.entities.urls.length) {
       status = MessageStatus.rejected_contains_media
-    } else if (text.length > 59) {
+    } else if (Buffer.byteLength(text, 'utf8') > 59) {
       status = MessageStatus.rejected_too_long
     } else {
       status = MessageStatus.accepted
