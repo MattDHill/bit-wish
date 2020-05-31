@@ -8,7 +8,8 @@ import {
 export enum MessageStatus {
   // active states
   accepted = 'accepted',
-  processing_bork = 'processing_bork',
+  processing_bork_1 = 'processing_bork_1',
+  processing_bork_2 = 'processing_bork_2',
   processing_reply = 'processing_reply',
   bork_failed = 'bork_failed',
   reply_failed = 'reply_failed',
@@ -46,8 +47,11 @@ export class Message {
   @Column('text', { name: 'text' })
   text: string
 
-  @Column('text', { name: 'bitcoin_txid', nullable: true })
-  bitcoinTxid: string | null
+  @Column('text', { name: 'bitcoin_txid_1', nullable: true })
+  bitcoinTxid1: string | null
+
+  @Column('text', { name: 'bitcoin_txid_2', nullable: true })
+  bitcoinTxid2: string | null
 
   @Column('text', { name: 'reply_tweet_id', nullable: true })
   replyTweetId: string | null
@@ -64,7 +68,8 @@ export interface MessageSeed {
   updatedAt: Date
   status: MessageStatus
   text: string
-  bitcoinTxid?: string
+  bitcoinTxid1?: string
+  bitcoinTxid2?: string
   replyTweetId?: string
   failedError?: string
 }

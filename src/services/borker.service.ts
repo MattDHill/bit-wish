@@ -14,11 +14,15 @@ const wallet = new JsWallet(mnemonic!.replace(/ +/g, " ").split(',')).childAt([-
 
 let feeEstimate: FeeEstimationRes
 
-export async function construct (handle: string, message: string): Promise<{ signedTx: string, inputs: Utx[] }> {
+export async function construct (handle: string, message: string): Promise<{ signedTxs: string[], inputs: Utx[] }> {
   if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 3600000) {
     feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
   }
-  const fee = feeEstimate.estimates[60].total.p2pkh.satoshi * 1.3
+
+  message = `${handle}: ${message}`
+  const txCount = message.length > 76 ? 2 : 1
+  const feePerTx = feeEstimate.estimates[60].total.p2pkh.satoshi * 1.25
+  const totalFee = feePerTx * txCount
 
   let inputs: Utx[] = []
   let accum = 0
@@ -48,18 +52,18 @@ export async function construct (handle: string, message: string): Promise<{ sig
     }
 
     skip = skip + utxos.length
-  } while (accum < fee)
+  } while (accum < totalFee)
 
-  const rawTxs = inputs.map(i => i.rawTx)
+  const rawTxInputs = inputs.map(i => i.rawTx)
 
   const data: NewBorkData = {
     type: BorkType.Bork,
-    content: `${handle}: ${message}`,
+    content: message,
   }
 
-  const txs = wallet.newBork(data, rawTxs, null, [], fee, Network.Bitcoin)
+  const signedTxs = wallet.newBork(data, rawTxInputs, null, [], totalFee, Network.Bitcoin)
 
-  return { signedTx: txs[0], inputs }
+  return { signedTxs, inputs }
 }
 
 async function getMoreUtxos (): Promise<number> {

@@ -69,7 +69,8 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       where: {
         status: In([
           MessageStatus.accepted,
-          MessageStatus.processing_bork,
+          MessageStatus.processing_bork_1,
+          MessageStatus.processing_bork_2,
           MessageStatus.processing_reply,
           MessageStatus.bork_failed,
           MessageStatus.reply_failed,
@@ -86,7 +87,7 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       status = MessageStatus.rejected_no_text
     } else if (m.entities.media.length || m.entities.polls.length || m.entities.urls.length) {
       status = MessageStatus.rejected_contains_media
-    } else if (Buffer.byteLength(text, 'utf8') > 59) {
+    } else if (Buffer.byteLength(text, 'utf8') > 134) {
       status = MessageStatus.rejected_too_long
     } else {
       status = MessageStatus.accepted
@@ -114,18 +115,34 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
 
 async function processBorkAndReply (message: Message): Promise<void> {
   message = await processBork(message)
-  if (message.bitcoinTxid) {
+  if (message.bitcoinTxid1) {
     await processReply(message)
   }
 }
 
 async function processBork (message: Message): Promise<Message> {
   try {
-    const { signedTx, inputs } = await borker.construct(message.userHandle, message.text)
-    const txid = await borker.broadcast(signedTx)
+    const { signedTxs, inputs } = await borker.construct(message.userHandle, message.text)
 
+    const txCount = signedTxs.length
+    if (txCount > 2) {
+      throw new Error(`Too many txs: ${txCount}`)
+    }
+
+    // first tx
+    const txid1 = await borker.broadcast(signedTxs[0])
+    message.bitcoinTxid1 = txid1
+    if (txCount > 1) {
+      message.status = MessageStatus.processing_bork_2
+    }
+    message = await getRepository(Message).save(message)
+
+    // 2nd tx
+    if (txCount > 1) {
+      const txid2 = await borker.broadcast(signedTxs[1])
+      message.bitcoinTxid2 = txid1
+    }
     message.status = MessageStatus.processing_reply
-    message.bitcoinTxid = txid
     message = await getRepository(Message).save(message)
 
     for (let input of inputs) {
@@ -140,7 +157,12 @@ async function processBork (message: Message): Promise<Message> {
 
 async function processReply (message: Message): Promise<void> {
   try {
-    const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, message.bitcoinTxid!)
+    let reply = message.bitcoinTxid1!
+    if (message.bitcoinTxid2) {
+      reply = reply + "\n\r" + message.bitcoinTxid2!
+    }
+
+    const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, reply)
     await getRepository(Message).update(message.tweetId, {
       status: MessageStatus.complete,
       replyTweetId: tweet.id_str
