@@ -18,6 +18,7 @@ export enum MessageStatus {
   rejected_too_long = 'rejected_too_long',
   rejected_contains_media = 'rejected_contains_media',
   rejected_duplicate = 'rejected_duplicate',
+  rejected_new_account = 'rejected_new_account',
   complete = 'complete',
 }
 
