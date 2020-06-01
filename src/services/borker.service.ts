@@ -1,23 +1,53 @@
 import { getRepository, IsNull, getManager } from 'typeorm'
 import { Utx, UtxSeed } from '../db/entities/utxo'
-import { JsWallet, BorkType, NewBorkData, Network } from 'borker-rs-node'
+import { FeeEstimate, FeeEstimateSeed } from '../db/entities/fee-estimate'
+import { JsWallet, BorkType, NewBorkData, Network, JsChildWallet } from 'borker-rs-node'
 import fetch from 'node-fetch'
-import proxyFetch from 'socks5-node-fetch'
+import ElectrumCli from 'electrum-client'
 
-const torFetch = proxyFetch({
-  socksHost: 'localhost',
-  socksPort: '9050'
-})
+let _ecl: ElectrumCli
+const ecl = async (): Promise<any> => {
+  if (!_ecl) {
+    _ecl = new ElectrumCli(50001, process.env.RPC_URL)
+    await _ecl.connect()
+  }
+  return _ecl
+}
 
-const mnemonic = process.env.NETWORK === 'mainnet' ? process.env.MNEMONIC : process.env.TEST_MNEMONIC
-const wallet = new JsWallet(mnemonic!.replace(/ +/g, " ").split(',')).childAt([-44, -0, -0, 0, 0])
+let _mnemonic: string
+const mnemonic = (): string => {
+  if (!_mnemonic) {
+    _mnemonic = process.env.NETWORK === 'mainnet' ? process.env.MNEMONIC! : process.env.TEST_MNEMONIC!
+  }
+  return _mnemonic
+}
+
+let _wallet: JsChildWallet
+const wallet = (): JsChildWallet => {
+  if (!_wallet) {
+    _wallet = new JsWallet(mnemonic().replace(/ +/g, " ").split(',')).childAt([-44, -0, -0, 0, 0])
+  }
+  return _wallet
+}
 
 let feeEstimate: FeeEstimationRes
 
 export async function construct (handle: string, message: string): Promise<{ signedTxs: string[], inputs: Utx[] }> {
-  if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 3600000) {
-    feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
+  if (!feeEstimate) {
+    const fromDB = await getManager().findOne(FeeEstimate, { order: { createdAt: 'DESC' } })
+    if (fromDB) { feeEstimate = JSON.parse(fromDB.feeObj) }
   }
+  if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 3600000) {
+    console.log('getting new fee estimate')
+    feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
+    const seed: FeeEstimateSeed = {
+      createdAt: new Date(),
+      feeObj: JSON.stringify({ ...feeEstimate, timestamp: feeEstimate.timestamp * 1000 })
+    }
+    await getRepository(FeeEstimate).save(getRepository(FeeEstimate).create(seed))
+  }
+
+  console.log('FEE ESTIMATE', feeEstimate)
 
   message = `${handle}: ${message}`
   const txCount = message.length > 76 ? 2 : 1
@@ -61,18 +91,15 @@ export async function construct (handle: string, message: string): Promise<{ sig
     content: message,
   }
 
-  const signedTxs = wallet.newBork(data, rawTxInputs, null, [], totalFee, Network.Bitcoin)
+  const version = process.env.NETWORK === 'mainnet' ? undefined : 42
+  const signedTxs = wallet().newBork(data, rawTxInputs, null, [], totalFee, Network.Bitcoin, version)
 
   return { signedTxs, inputs }
 }
 
 async function getMoreUtxos (): Promise<number> {
-
-  let utxos = await rpcRequest<ListUnspentRes>({
-    id: 1,
-    method: 'blockchain.address.listunspent',
-    params: [wallet.address(Network.Bitcoin)]
-  }) || []
+  const scripthash = process.env.NETWORK === 'mainnet' ? process.env.SCRIPT_HASH! : process.env.TEST_SCRIPT_HASH!
+  let utxos = await rpcRequest<ListUnspentRes>(1, 'blockchain.scripthash.listunspent', [scripthash]) || []
 
   if (!utxos.length) { return 0 }
 
@@ -88,11 +115,7 @@ async function getMoreUtxos (): Promise<number> {
   const toSave: UtxSeed[] = []
 
   for (let txid in unspent) {
-    const rawTx = await rpcRequest<string>({
-      id: 2,
-      method: 'blockchain.transaction.get',
-      params: [txid]
-    })
+    const rawTx = await rpcRequest<string>(2, 'blockchain.transaction.get', [txid])
 
     toSave.push({
       txid,
@@ -114,36 +137,16 @@ async function getMoreUtxos (): Promise<number> {
 }
 
 export async function broadcast (signedTx: string): Promise<string> {
-  return rpcRequest<string>({
-    id: 3,
-    method: 'blockchain.transaction.broadcast',
-    params: [signedTx]
-  })
+  return rpcRequest<string>(3, 'blockchain.transaction.broadcast', [signedTx])
 }
 
-export async function rpcRequest<T>(body: RPCReq): Promise<T> {
-
-  const url = process.env.RPC_URL!
-  const request = url.includes('.onion') ? torFetch : fetch
-
-  let res: RPCRes<T>
+export async function rpcRequest<T>(id: number, method: string, params: any[]): Promise<T> {
   try {
-    res = await (await request(url, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })).json()
+    const client = await ecl()
+    return client.request(method, params)
   } catch (e) {
-    throw new Error(`4:${e}`)
+    throw new Error(`${id}:${e.code || '9999'}:${e.message || 'unknown'}`)
   }
-
-  const result = res.result
-
-  if (!result) {
-    const error = res.error!
-    throw new Error(`${body.id}:${error.code}:${error.message}`)
-  }
-
-  return result
 }
 
 interface FeeEstimationRes {
@@ -161,26 +164,9 @@ interface FeeEstimationRes {
   }
 }
 
-interface RPCReq {
-  id: number
-  method: string
-  params: any[]
-}
-
-interface RPCRes<T> {
-  id: number
-  result?: T
-  error?: RPCError
-}
-
 type ListUnspentRes = {
   tx_hash: string
   tx_pos: number
   value: number
   height: number
 }[]
-
-interface RPCError {
-  code: number
-  message: string
-}

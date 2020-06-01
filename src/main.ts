@@ -3,8 +3,9 @@ import { Message, MessageStatus, MessageSeed } from './db/entities/message'
 import { Utx } from './db/entities/utxo'
 import * as twitter from './services/twitter.service'
 import * as borker from './services/borker.service'
+import { confirm } from 'node-ask'
 
-let since_id: string | undefined
+let since_id: string
 let max_id: string | undefined
 
 export async function start (): Promise<void> {
@@ -13,6 +14,7 @@ export async function start (): Promise<void> {
     order: { createdAt: 'ASC' },
   })
   for (let message of replyFailed) {
+    if (!await confirm('process previously failed reply? ', message)) { throw new Error('Matt rejected processing previously failed relies') }
     await processReply(message)
   }
 
@@ -21,11 +23,12 @@ export async function start (): Promise<void> {
     order: { createdAt: 'ASC' },
   })
   for (let message of borkFailed) {
+    if (!await confirm('process previously failed bork? ', message)) { throw new Error('Matt rejected processing previously failed borks') }
     await processBorkAndReply(message)
   }
 
   const last = await getManager().findOne(Message, { order: { createdAt: 'DESC' } })
-  if (last) { since_id = last.tweetId }
+  since_id = last ? last.tweetId : process.env.TWITTER_TWEET_ID!
   poll()
 }
 
@@ -33,7 +36,9 @@ async function poll () {
   try {
     const mentions = await getMentions()
     // oldest to newest
-    if (mentions.length) { await processMentions(mentions.reverse()) }
+    if (mentions.length) {
+      await processMentions(mentions.reverse())
+    }
   } catch (e) {
     console.error(e.message)
   } finally {
@@ -42,31 +47,37 @@ async function poll () {
 }
 
 async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
-  let keepGoing = true
   let toReturn: twitter.MentionsTimelineRow[] = []
+  let count = 0
 
-  while (keepGoing) {
-    try {
-      const mentions = await twitter.getMentions(since_id, max_id)
-      if (max_id) { mentions.shift() }
-      keepGoing = !!mentions.length
-      toReturn.concat(mentions)
-      max_id = mentions[mentions.length - 1].id_str
-    } catch (e) {
-      console.error(`error fetching mentions: ${e}`)
-      keepGoing = false
+  try {
+    while (count < 10) {
+      if (!await confirm('get new mentions? ')) { throw new Error('Matt rejected getting new mentions') }
+      console.log(`getting new mentions: since_id: ${since_id}, max_id: ${max_id}`)
+      const newMentions = await twitter.getMentions(since_id, max_id)
+      console.log(`MENTIONS`, JSON.stringify(newMentions))
+      if (max_id) { newMentions.shift() }
+      toReturn = toReturn.concat(newMentions)
+      if(newMentions.length < 10) { break }
+      max_id = newMentions[newMentions.length - 1].id_str
+      count++
     }
+  } catch (e) {
+    console.error(`error fetching mentions: ${e}`)
   }
-  
   return toReturn
 }
 
 async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promise<void> {
   const relevant = mentions.filter(m => m.in_reply_to_status_id_str === process.env.TWITTER_TWEET_ID!)
 
+  if (!await confirm(`${relevant.length} relevant mentions found. Process? `)) { throw new Error('Matt rejected processing mentions') }
+  console.log('processing relevant mentions')
+
   for (let m of relevant) {
-    const previous = await getRepository(Message).findOne(m.user.id_str, {
+    const previous = await getManager().findOne(Message, {
       where: {
+        userId: m.user.id_str,
         status: In([
           MessageStatus.accepted,
           MessageStatus.processing_bork_1,
@@ -85,7 +96,7 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       status = MessageStatus.rejected_duplicate
     } else if (!text) {
       status = MessageStatus.rejected_no_text
-    } else if (m.entities.media.length || m.entities.polls.length || m.entities.urls.length) {
+    } else if ((m.entities.media && m.entities.media.length) || (m.entities.polls && m.entities.polls.length) || (m.entities.urls && m.entities.urls.length)) {
       status = MessageStatus.rejected_contains_media
     } else if (Buffer.byteLength(text, 'utf8') > 134) {
       status = MessageStatus.rejected_too_long
@@ -123,6 +134,7 @@ async function processBorkAndReply (message: Message): Promise<void> {
 }
 
 async function processBork (message: Message): Promise<Message> {
+  console.log('processing bork')
   try {
     const { signedTxs, inputs } = await borker.construct(message.userHandle, message.text)
 
@@ -132,7 +144,11 @@ async function processBork (message: Message): Promise<Message> {
     }
 
     // first tx
+    console.log('Message to Bork', message)
+    if (!await confirm(`Process tx ${txCount > 1 ? '1 of 2' : '1 of 1'}? `)) { throw new Error('Matt aborted tx 1') }
+    console.log(`boradcasting tx ${txCount > 1 ? '1 of 2' : '1 of 1'}`)
     const txid1 = await borker.broadcast(signedTxs[0])
+    console.log(`TXID1: ${txid1}`)
     message.bitcoinTxid1 = txid1
     if (txCount > 1) {
       message.status = MessageStatus.processing_bork_2
@@ -141,8 +157,11 @@ async function processBork (message: Message): Promise<Message> {
 
     // 2nd tx
     if (txCount > 1) {
+      if (!await confirm('Process tx 2 of 2? ')) { throw new Error('Matt aborted tx 2') }
+      console.log(`boradcasting tx 2 of 2`)
       const txid2 = await borker.broadcast(signedTxs[1])
-      message.bitcoinTxid2 = txid1
+      console.log(`TXID2: ${txid2}`)
+      message.bitcoinTxid2 = txid2
     }
     message.status = MessageStatus.processing_reply
     message = await getRepository(Message).save(message)
@@ -158,13 +177,17 @@ async function processBork (message: Message): Promise<Message> {
 }
 
 async function processReply (message: Message): Promise<void> {
-  try {
-    let reply = message.bitcoinTxid1!
-    if (message.bitcoinTxid2) {
-      reply = reply + "\n\r" + message.bitcoinTxid2!
-    }
+  let reply = `@${message.userHandle}` + "\n\r" + message.bitcoinTxid1
+  if (message.bitcoinTxid2) {
+    reply = reply + "\n\r" + message.bitcoinTxid2
+  }
 
+  console.log('reply to tweet', reply)
+  try {
+    if (!await confirm('Process reply? ')) { throw new Error('Matt rejected processing reply') }
+    console.log(`processing reply`)
     const tweet = await twitter.tweetReply(message.tweetId, message.userHandle, reply)
+    console.log('REPLY', tweet)
     await getRepository(Message).update(message.tweetId, {
       status: MessageStatus.complete,
       replyTweetId: tweet.id_str
@@ -176,8 +199,9 @@ async function processReply (message: Message): Promise<void> {
 
 async function handleError (tweetId: string, status: MessageStatus, e: Error): Promise<void> {
   console.error(e)
+
   await getRepository(Message).update(tweetId, {
     status,
-    failedError: JSON.stringify(e)
+    failedError: e.toString(),
   })
 }

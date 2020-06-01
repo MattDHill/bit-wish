@@ -1,6 +1,7 @@
 import Twitter from 'twitter-lite'
 
-const client = new Twitter({
+let _client: Twitter
+const client = () => _client || new Twitter({
   consumer_key: process.env.TWITTER_CONSUMER_KEY!,
   consumer_secret: process.env.TWITTER_CONSUMER_SECRET!,
   access_token_key: process.env.TWITTER_ACCESS_TOKEN_KEY!,
@@ -15,12 +16,12 @@ export async function getMentions (since_id: string | undefined, max_id: string 
   if (since_id) { params.since_id = since_id }
   if (max_id) { params.max_id = max_id }
 
-  return client.get<MentionsTimelineRow[]>('statuses/mentions_timeline', params)
+  return client().get<MentionsTimelineRow[]>('statuses/mentions_timeline', params)
 }
 
 // @TODO max 300 per 3 hour period
 export async function tweetReply (tweetId: string, handle: string, txid: string): Promise<TweetRes> {
-  return client.post<TweetRes>('statuses/update', {
+  return client().post<TweetRes>('statuses/update', {
     status: txid,
     in_reply_to_status_id: tweetId,
     username: handle,
@@ -45,9 +46,9 @@ export interface MentionsTimelineRow {
   user: User
   in_reply_to_screen_name: string | null
   entities: {
-    media: any[]
-    polls: any[]
-    urls: any[]
+    media?: any[]
+    polls?: any[]
+    urls?: any[]
   }
 }
 
