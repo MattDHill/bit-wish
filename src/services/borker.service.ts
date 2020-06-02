@@ -51,7 +51,7 @@ export async function construct (handle: string, message: string): Promise<{ sig
 
   message = `@${handle} ${message}`
   const txCount = message.length > 74 ? 2 : 1
-  const feePerTx = feeEstimate.estimates[60].total.p2pkh.satoshi * 1.25
+  const feePerTx = feeEstimate.estimates[60].total.p2pkh.satoshi
   const totalFee = feePerTx * txCount
   const minSats = totalFee + feePerTx // for output back to self
 
@@ -71,10 +71,11 @@ export async function construct (handle: string, message: string): Promise<{ sig
     throw new Error('Not enough BTC!')
   }
 
+  const borkId = process.env.NETWORK === 'mainnet' ? process.env.BORK_ID! : process.env.TEST_BORK_ID!
   const data: NewBorkData = {
     type: BorkType.Comment,
     content: message,
-    referenceId: process.env.BORK_ID!.substr(0, 2)
+    referenceId: borkId.substr(0, 2)
   }
   const rawTxInputs = inputs.map(i => i.rawTx)
   const recipient = {
@@ -82,6 +83,7 @@ export async function construct (handle: string, message: string): Promise<{ sig
     value: available - totalFee
   }
   const version = process.env.NETWORK === 'mainnet' ? undefined : 42
+  console.log(data, rawTxInputs, recipient, version)
 
   const signedTxs = wallet().newBork(data, rawTxInputs, recipient, [], totalFee, Network.Bitcoin, version)
 

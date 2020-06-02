@@ -1,30 +1,36 @@
 import { getRepository, In, getManager } from 'typeorm'
 import { Message, MessageStatus, MessageSeed } from './db/entities/message'
 import { Utx } from './db/entities/utxo'
+import { confirm } from 'node-ask'
 import * as twitter from './services/twitter.service'
 import * as borker from './services/borker.service'
-import { confirm } from 'node-ask'
 
 let since_id: string
 let max_id: string | undefined
 
 export async function start (): Promise<void> {
-  const replyFailed = await getManager().find(Message, {
+  const failedReplies = await getManager().find(Message, {
     where: { status: In([MessageStatus.reply_failed]) },
     order: { createdAt: 'ASC' },
   })
-  for (let message of replyFailed) {
-    if (!await confirm('process previously failed reply? ', message)) { throw new Error('Matt rejected processing previously failed relies') }
-    await processReply(message)
+  if (failedReplies.length) {
+    if (await confirm(`process ${failedReplies.length} previously failed replies? `)) {
+      for (let message of failedReplies) {
+        await processReply(message)
+      }
+    }
   }
 
-  const borkFailed = await getManager().find(Message, {
+  const failedBorks = await getManager().find(Message, {
     where: { status: In([MessageStatus.bork_failed]) },
     order: { createdAt: 'ASC' },
   })
-  for (let message of borkFailed) {
-    if (!await confirm('process previously failed bork? ', message)) { throw new Error('Matt rejected processing previously failed borks') }
-    await processBorkAndReply(message)
+  if (failedBorks.length) {
+    if (await confirm(`process ${failedBorks.length} previously failed borks? `)) {
+      for (let message of failedBorks) {
+        await processBorkAndReply(message)
+      }
+    }
   }
 
   const last = await getManager().findOne(Message, { order: { createdAt: 'DESC' } })
@@ -35,9 +41,8 @@ export async function start (): Promise<void> {
 async function poll () {
   try {
     const mentions = await getMentions()
-    // oldest to newest
     if (mentions.length) {
-      await processMentions(mentions.reverse())
+      await processMentions(mentions.reverse()) // oldest to newest
     }
   } catch (e) {
     console.error(e.message)
@@ -48,17 +53,17 @@ async function poll () {
 
 async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
   let toReturn: twitter.MentionsTimelineRow[] = []
-  let count = 0
+  let count = 1
 
   try {
-    while (count < 10) {
-      if (!await confirm('get new mentions? ')) { throw new Error('Matt rejected getting new mentions') }
+    while (count <= 10) { // don't abuse Twitter. 10 fetches is plenty
+      if (!await confirm(`get new mentions ${count}? `)) { throw new Error('Matt rejected getting new mentions') }
       console.log(`getting new mentions: since_id: ${since_id}, max_id: ${max_id}`)
       const newMentions = await twitter.getMentions(since_id, max_id)
       console.log(`MENTIONS`, JSON.stringify(newMentions))
       if (max_id) { newMentions.shift() }
       toReturn = toReturn.concat(newMentions)
-      if(newMentions.length < 10) { break }
+      if (newMentions.length < 10) { break }
       max_id = newMentions[newMentions.length - 1].id_str
       count++
     }
