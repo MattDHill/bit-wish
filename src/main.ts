@@ -42,7 +42,7 @@ async function poll () {
   } catch (e) {
     console.error(e.message)
   } finally {
-    setTimeout(poll, 43200000) // 12h
+    setTimeout(poll, 3600000) // 1h
   }
 }
 
@@ -98,7 +98,7 @@ async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promis
       status = MessageStatus.rejected_no_text
     } else if ((m.entities.media && m.entities.media.length) || (m.entities.polls && m.entities.polls.length) || (m.entities.urls && m.entities.urls.length)) {
       status = MessageStatus.rejected_contains_media
-    } else if (Buffer.byteLength(text, 'utf8') > 134) {
+    } else if (Buffer.byteLength(text, 'utf8') > 132) {
       status = MessageStatus.rejected_too_long
     } else if (new Date(m.user.created_at).valueOf() > Number(process.env.CUTOFF_DATE!)) {
       status = MessageStatus.rejected_too_long

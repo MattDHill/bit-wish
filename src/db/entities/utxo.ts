@@ -13,7 +13,7 @@ export class Utx {
   @Column('datetime', { name: 'created_at' })
   receivedAt: Date
 
-  @Column('datetime', { name: 'updated_at', nullable: true })
+  @Column('datetime', { name: 'spent_at', nullable: true })
   spentAt: Date | null
 
   @Column('int', { name: 'amount' })

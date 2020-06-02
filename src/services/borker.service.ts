@@ -37,7 +37,7 @@ export async function construct (handle: string, message: string): Promise<{ sig
     const fromDB = await getManager().findOne(FeeEstimate, { order: { createdAt: 'DESC' } })
     if (fromDB) { feeEstimate = JSON.parse(fromDB.feeObj) }
   }
-  if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 3600000) {
+  if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 1800000) { // 30m
     console.log('getting new fee estimate')
     feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
     const seed: FeeEstimateSeed = {
@@ -49,59 +49,50 @@ export async function construct (handle: string, message: string): Promise<{ sig
 
   console.log('FEE ESTIMATE', feeEstimate)
 
-  message = `${handle}: ${message}`
-  const txCount = message.length > 76 ? 2 : 1
+  message = `@${handle} ${message}`
+  const txCount = message.length > 74 ? 2 : 1
   const feePerTx = feeEstimate.estimates[60].total.p2pkh.satoshi * 1.25
   const totalFee = feePerTx * txCount
+  const minSats = totalFee + feePerTx // for output back to self
 
-  let inputs: Utx[] = []
-  let accum = 0
-  let skip = 0
-  do {
-    let utxos = await getRepository(Utx).find({
-      where: {
-        spentAt: IsNull()
-      },
-      order: { receivedAt: 'ASC' },
-      take: 10,
-      skip,
-    })
+  await getMoreUtxos()
 
-    if (!utxos.length) {
-      const moreUtxos = await getMoreUtxos()
-      if (moreUtxos) {
-        continue
-      } else {
-        throw new Error('No more BTC!')
-      }
-    }
+  let inputs = await getRepository(Utx).find({
+    where: {
+      spentAt: IsNull()
+    },
+  })
 
-    for (let u of utxos) {
-      inputs.push(u)
-      accum = accum + u.amount
-    }
+  let available = inputs.reduce((a, b) => {
+    return a + b.amount
+  }, 0)
 
-    skip = skip + utxos.length
-  } while (accum < totalFee)
-
-  const rawTxInputs = inputs.map(i => i.rawTx)
-
-  const data: NewBorkData = {
-    type: BorkType.Bork,
-    content: message,
+  if (available < minSats) {
+    throw new Error('Not enough BTC!')
   }
 
+  const data: NewBorkData = {
+    type: BorkType.Comment,
+    content: message,
+    referenceId: process.env.BORK_ID!.substr(0, 2)
+  }
+  const rawTxInputs = inputs.map(i => i.rawTx)
+  const recipient = {
+    address: wallet().address(Network.Bitcoin),
+    value: available - totalFee
+  }
   const version = process.env.NETWORK === 'mainnet' ? undefined : 42
-  const signedTxs = wallet().newBork(data, rawTxInputs, null, [], totalFee, Network.Bitcoin, version)
+
+  const signedTxs = wallet().newBork(data, rawTxInputs, recipient, [], totalFee, Network.Bitcoin, version)
 
   return { signedTxs, inputs }
 }
 
-async function getMoreUtxos (): Promise<number> {
+async function getMoreUtxos (): Promise<void> {
   const scripthash = process.env.NETWORK === 'mainnet' ? process.env.SCRIPT_HASH! : process.env.TEST_SCRIPT_HASH!
   let utxos = await rpcRequest<ListUnspentRes>(1, 'blockchain.scripthash.listunspent', [scripthash]) || []
 
-  if (!utxos.length) { return 0 }
+  if (!utxos.length) { return }
 
   const unspent = utxos.reduce((acc, u) => {
     if (acc[u.tx_hash]) {
@@ -125,15 +116,12 @@ async function getMoreUtxos (): Promise<number> {
     })
   }
 
-  const inserted = await getManager().createQueryBuilder()
+  await getManager().createQueryBuilder()
     .insert()
     .into('utxos')
     .values(toSave)
     .onConflict('DO NOTHING')
     .execute()
-
-  // @TODO confirm this return an array containing all inserted rows and empty array if none
-  return inserted.identifiers.length
 }
 
 export async function broadcast (signedTx: string): Promise<string> {
