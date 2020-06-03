@@ -52,25 +52,18 @@ async function poll () {
 }
 
 async function getMentions (): Promise<twitter.MentionsTimelineRow[]> {
-  let toReturn: twitter.MentionsTimelineRow[] = []
-  let count = 1
-
   try {
-    while (count <= 10) { // don't abuse Twitter. 10 fetches is plenty
-      if (!await confirm(`get new mentions ${count}? `)) { throw new Error('Matt rejected getting new mentions') }
-      console.log(`getting new mentions: since_id: ${since_id}, max_id: ${max_id}`)
-      const newMentions = await twitter.getMentions(since_id, max_id)
-      console.log(`MENTIONS`, JSON.stringify(newMentions))
-      if (max_id) { newMentions.shift() }
-      toReturn = toReturn.concat(newMentions)
-      if (newMentions.length < 10) { break }
-      max_id = newMentions[newMentions.length - 1].id_str
-      count++
-    }
+    if (!await confirm(`get new mentions: ${since_id}, max_id: ${max_id}? `)) { throw new Error('Matt rejected getting new mentions') }
+    console.log(`getting new mentions: since_id: ${since_id}, max_id: ${max_id}`)
+    const newMentions = await twitter.getMentions(since_id, max_id)
+    console.log(`MENTIONS`, JSON.stringify(newMentions))
+    if (max_id) { newMentions.shift() }
+    max_id = newMentions[newMentions.length - 1].id_str
+    return newMentions
   } catch (e) {
     console.error(`error fetching mentions: ${e}`)
+    return []
   }
-  return toReturn
 }
 
 async function processMentions (mentions: twitter.MentionsTimelineRow[]): Promise<void> {

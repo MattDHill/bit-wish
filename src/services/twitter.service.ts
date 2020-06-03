@@ -11,7 +11,7 @@ const client = () => _client || new Twitter({
 export async function getMentions (since_id: string | undefined, max_id: string | undefined): Promise<MentionsTimelineRow[]> {
   const params: GetMentionsParams = {
     tweet_mode: 'extended',
-    include_rts: 1,
+    count: 100, // 100 per hour
   }
   if (since_id) { params.since_id = since_id }
   if (max_id) { params.max_id = max_id }
@@ -31,7 +31,7 @@ export async function tweetReply (tweetId: string, handle: string, txid: string)
 
 interface GetMentionsParams {
   tweet_mode: 'extended'
-  include_rts: 1
+  count: 100
   since_id?: string
   max_id?: string
 }
