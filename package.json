@@ -1,20 +1,19 @@
 {
-  "name": "bit-wish",
+  "name": "bitwish-server",
   "version": "1.0.0",
   "description": "Twitter app to embed tweets in the Bitcoin transactions",
   "author": "MattDHill",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:MattDHill/bit-wish.git"
+    "url": "git@github.com:MattDHill/bitwish-server.git"
   },
   "main": "dist/index.js",
   "scripts": {
     "clean": "rimraf dist/*",
     "compile": "tsc",
     "build": "npm run clean && npm run compile",
-    "start": "node dist/src",
-    "test": "mocha -r ts-node/register 'test/**/*.spec.ts' --exit"
+    "start": "node dist/src"
   },
   "dependencies": {
     "borker-rs-node": "0.1.30",
@@ -24,20 +23,15 @@
     "node-fetch": "^2.6.0",
     "reflect-metadata": "^0.1.13",
     "sqlite3": "^4.2.0",
-    "tslib": "1.11.2",
-    "twitter-lite": "^0.11.0",
+    "tslib": "2.0.0",
+    "twitter-lite": "^0.13.0",
     "typeorm": "^0.2.24"
   },
   "devDependencies": {
-    "@types/mocha": "^7.0.2",
-    "@types/node": "^13.13.1",
+    "@types/node": "^14.0.0",
     "@types/node-fetch": "^2.5.7",
-    "@types/sinon": "^9.0.0",
     "@types/sqlite3": "^3.1.5",
-    "mocha": "^7.1.1",
     "rimraf": "^3.0.2",
-    "sinon": "^9.0.2",
-    "ts-node": "^8.9.0",
     "typescript": "^3.8.0"
   }
 }

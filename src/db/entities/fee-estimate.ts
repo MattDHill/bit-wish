@@ -4,17 +4,21 @@ import {
   Column,
 } from 'typeorm'
 
-@Entity({ name: 'fee_estimate' })
-export class FeeEstimate {
+@Entity({ name: 'fees' })
+export class Fee {
 
-  @PrimaryColumn('datetime', { name: 'created_at' })
-  createdAt: Date
+  @PrimaryColumn('int', { name: 'timestamp' })
+  timestamp: number
 
-  @Column('text', { name: 'fee_obj' })
-  feeObj: string
+  @Column('int', { name: 'total' })
+  total: number
+
+  @Column('text', { name: 'raw' })
+  raw: string
 }
 
-export interface FeeEstimateSeed {
-  createdAt: Date
-  feeObj: string
+export interface FeeSeed {
+  timestamp: number
+  total: number
+  raw: string
 }

@@ -1,6 +1,6 @@
 import { getRepository, IsNull, getManager } from 'typeorm'
 import { Utx, UtxSeed } from '../db/entities/utxo'
-import { FeeEstimate, FeeEstimateSeed } from '../db/entities/fee-estimate'
+import { Fee, FeeSeed } from '../db/entities/fee-estimate'
 import { JsWallet, BorkType, NewBorkData, Network, JsChildWallet } from 'borker-rs-node'
 import fetch from 'node-fetch'
 import ElectrumCli from 'electrum-client'
@@ -30,28 +30,28 @@ const wallet = (): JsChildWallet => {
   return _wallet
 }
 
-let feeEstimate: FeeEstimationRes
+let fee: Fee | undefined
 
 export async function construct (handle: string, message: string): Promise<{ signedTxs: string[], inputs: Utx[] }> {
-  if (!feeEstimate) {
-    const fromDB = await getManager().findOne(FeeEstimate, { order: { createdAt: 'DESC' } })
-    if (fromDB) { feeEstimate = JSON.parse(fromDB.feeObj) }
+  if (!fee) {
+    fee = await getManager().findOne(Fee, { order: { timestamp: 'DESC' } })
   }
-  if (!feeEstimate || new Date().valueOf() - feeEstimate.timestamp > 1800000) { // 30m
+  if (!fee || new Date().valueOf() - fee.timestamp > 1800000) { // 30m
     console.log('getting new fee estimate')
-    feeEstimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
-    const seed: FeeEstimateSeed = {
-      createdAt: new Date(),
-      feeObj: JSON.stringify({ ...feeEstimate, timestamp: feeEstimate.timestamp * 1000 })
+    const estimate = await (await fetch('https://bitcoiner.live/api/fees/estimates/latest')).json()
+    const seed: FeeSeed = {
+      timestamp: new Date().valueOf(),
+      total: estimate.estimates[180].total.p2pkh.satoshi,
+      raw: JSON.stringify(estimate)
     }
-    await getRepository(FeeEstimate).save(getRepository(FeeEstimate).create(seed))
+    fee = await getRepository(Fee).save(getRepository(Fee).create(seed))
   }
 
-  console.log('FEE ESTIMATE', feeEstimate)
+  console.log('FEE ESTIMATE', fee)
 
   message = `@${handle} ${message}`
   const txCount = message.length > 74 ? 2 : 1
-  const feePerTx = feeEstimate.estimates[60].total.p2pkh.satoshi
+  const feePerTx = fee.total
   const totalFee = feePerTx * txCount
   const minSats = totalFee + feePerTx // for output back to self
 
