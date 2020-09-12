@@ -20,7 +20,7 @@
     "dotenv": "^8.2.0",
     "electrum-client": "0.0.6",
     "node-ask": "^1.0.1",
-    "node-fetch": "^2.6.0",
+    "node-fetch": "^2.6.1",
     "reflect-metadata": "^0.1.13",
     "sqlite3": "^4.2.0",
     "tslib": "2.0.0",
